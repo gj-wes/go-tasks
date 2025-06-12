@@ -8,7 +8,6 @@ package main
 
 import (
 	"encoding/csv"
-	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -24,55 +23,90 @@ type Task struct {
 }
 
 func main() {
-	argsNoProg := os.Args[1:]
-
-	if argsNoProg[0] != "task" {
-		fmt.Println("start command with 'task'")
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: ./task <command>")
 		return
 	}
 
-	command := argsNoProg[1]
+	cmd, args, err := parseCommand()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	}
 
-	switch command {
-	case "add":
-		if len(argsNoProg) < 3 {
-			fmt.Println("Task missing description")
-			return
-		}
-		desc := argsNoProg[2]
-		addTask(desc)
-	case "list":
-		listCmd := flag.NewFlagSet("list", flag.ExitOnError)
-		showAll := listCmd.Bool("all", false, "list all tasks including completed")
-
-		listCmd.Parse(argsNoProg[2:])
-
-		listTasks(*showAll)
-	case "complete":
-		if len(argsNoProg) < 3 {
-			fmt.Println("Provide Task ID")
-			return
-		}
-		ID := argsNoProg[2]
-		markComplete(ID)
-	case "delete":
-		if len(argsNoProg) < 3 {
-			fmt.Println("Provide Task ID")
-			return
-		}
-		ID := argsNoProg[2]
-		deleteTask(ID)
-	default:
-		fmt.Println("command not found, please use 'add', 'list', 'complete' or 'delete")
+	if err := executeCommand(cmd, args); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
 	}
 }
 
-func addTask(desc string) {
+func parseCommand() (string, []string, error) {
+	if len(os.Args) < 2 {
+		return "", nil, fmt.Errorf("no command provided")
+	}
+
+	command := os.Args[1]
+	anyarguments := []string{}
+
+	if len(os.Args) > 2 {
+		anyarguments = os.Args[2:]
+	}
+
+	return command, anyarguments, nil
+}
+
+func executeCommand(cmd string, args []string) error {
+	switch cmd {
+	case "add":
+		return handleAddCommand(args)
+	case "list":
+		return handleListCommand(args)
+	case "complete":
+		return handleCompleteCommand(args)
+	case "delete":
+		return handleDeleteCommand(args)
+	default:
+		return fmt.Errorf("'%s' command not found. Available commands: 'add', 'list', 'complete' or 'delete'", cmd)
+	}
+}
+
+func handleAddCommand(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("Add command requires task description")
+	}
+
+	description := args[0]
+	return addTask(description)
+}
+func handleListCommand(args []string) error {
+	showAll := false
+	if len(args) > 0 && args[0] == "-all" {
+		showAll = true
+	}
+
+	return listTasks(showAll)
+}
+func handleCompleteCommand(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("Complete command requires task ID")
+	}
+
+	ID := args[0]
+	return markComplete(ID)
+}
+func handleDeleteCommand(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("Delete command requires task ID")
+	}
+
+	ID := args[0]
+	return deleteTask(ID)
+}
+
+func addTask(desc string) error {
 	file, err := os.OpenFile("tasks.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 
 	if err != nil {
-		fmt.Println("Error opening file:", err)
-		return
+		return fmt.Errorf("Error opening file")
 	}
 	defer file.Close()
 
@@ -80,8 +114,7 @@ func addTask(desc string) {
 	r := csv.NewReader(readfile)
 	tasks, err := r.ReadAll()
 	if err != nil {
-		fmt.Println("Error reading CSV:", err)
-		return
+		return fmt.Errorf("Error reading CSV")
 	}
 	defer readfile.Close()
 
@@ -98,21 +131,22 @@ func addTask(desc string) {
 	w := csv.NewWriter(file)
 	file.WriteString("\n")
 	if err := w.Write(record); err != nil {
-		fmt.Println("Error writing csv:", err)
+		return fmt.Errorf("Error writing csv")
 	}
 
 	w.Flush()
 
 	if err := w.Error(); err != nil {
-		fmt.Println("Error flushing csv:", err)
+		return fmt.Errorf("Error flushing csv")
 	}
+
+	return nil
 }
 
-func listTasks(showAll bool) {
+func listTasks(showAll bool) error {
 	file, err := os.Open("tasks.csv")
 	if err != nil {
-		fmt.Println("Error opening file:", err)
-		return
+		return fmt.Errorf("Error opening file")
 	}
 	defer file.Close()
 
@@ -120,8 +154,7 @@ func listTasks(showAll bool) {
 
 	tasks, err := r.ReadAll()
 	if err != nil {
-		fmt.Println("Error reading CSV:", err)
-		return
+		return fmt.Errorf("Error reading CSV")
 	}
 
 	// TODO: Formatting for Time output, '1 day ago'
@@ -135,15 +168,16 @@ func listTasks(showAll bool) {
 		}
 	}
 	t.Flush()
+
+	return nil
 }
 
-func markComplete(ID string) {
+func markComplete(ID string) error {
 	readfile, err := os.Open("tasks.csv")
 	r := csv.NewReader(readfile)
 	tasks, err := r.ReadAll()
 	if err != nil {
-		fmt.Println("Error reading CSV:", err)
-		return
+		return fmt.Errorf("Error reading CSV")
 	}
 	defer readfile.Close()
 
@@ -164,29 +198,29 @@ func markComplete(ID string) {
 
 	file, err := os.Create("tasks.csv")
 	if err != nil {
-		fmt.Println("Error opening CSV:", err)
-		return
+		return fmt.Errorf("Error opening CSV")
 	}
 	defer file.Close()
 	w := csv.NewWriter(file)
 	if err := w.WriteAll(tasks); err != nil {
-		fmt.Println("Error writing csv:", err)
+		return fmt.Errorf("Error writing csv")
 	}
 
 	w.Flush()
 
 	if err := w.Error(); err != nil {
-		fmt.Println("Error flushing csv:", err)
+		return fmt.Errorf("Error flushing csv")
 	}
+
+	return nil
 }
 
-func deleteTask(ID string) {
+func deleteTask(ID string) error {
 	readfile, err := os.Open("tasks.csv")
 	r := csv.NewReader(readfile)
 	tasks, err := r.ReadAll()
 	if err != nil {
-		fmt.Println("Error reading CSV:", err)
-		return
+		return fmt.Errorf("Error reading CSV")
 	}
 	defer readfile.Close()
 
@@ -215,20 +249,21 @@ func deleteTask(ID string) {
 
 	file, err := os.Create("tasks.csv")
 	if err != nil {
-		fmt.Println("Error opening CSV:", err)
-		return
+		return fmt.Errorf("Error opening CSV")
 	}
 	defer file.Close()
 	w := csv.NewWriter(file)
 	if err := w.WriteAll(filteredTasks); err != nil {
-		fmt.Println("Error writing csv:", err)
+		return fmt.Errorf("Error writing CSV")
 	}
 
 	w.Flush()
 
 	if err := w.Error(); err != nil {
-		fmt.Println("Error flushing csv:", err)
+		return fmt.Errorf("Error flushing CSV")
 	}
+
+	return nil
 }
 
 func getNextID(records [][]string) int {
