@@ -228,7 +228,7 @@ func main() {
 
 	tm := NewTaskManager(TasksFile)
 
-	cmd, args, err := parseCommand()
+	cmd, args, err := parseCommand(os.Args)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 	}
@@ -239,16 +239,16 @@ func main() {
 	}
 }
 
-func parseCommand() (string, []string, error) {
-	if len(os.Args) < 2 {
+func parseCommand(args []string) (string, []string, error) {
+	if len(args) < 2 {
 		return "", nil, fmt.Errorf("no command provided")
 	}
 
-	command := os.Args[1]
+	command := args[1]
 	anyarguments := []string{}
 
-	if len(os.Args) > 2 {
-		anyarguments = os.Args[2:]
+	if len(args) > 2 {
+		anyarguments = args[2:]
 	}
 
 	return command, anyarguments, nil
