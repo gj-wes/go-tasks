@@ -4,7 +4,6 @@ package main
 // Change the IsComplete property of the Task data model to use a timestamp instead, which gives further information.
 // Change from CSV to JSON, JSONL or SQLite
 // Add in an optional due date to the tasks
-// TODO: Improve errors if no tasks/CSV not present
 
 import (
 	"encoding/csv"
@@ -15,11 +14,210 @@ import (
 	"time"
 )
 
+const TasksFile = "tasks.csv"
+
 type Task struct {
 	ID          int
 	Description string
 	CreatedAt   time.Time
 	IsComplete  bool
+}
+
+// TaskManager to hold tasks in memory and manage file operations
+// Reduce repeated opens/reads had before
+type TaskManager struct {
+	tasks    []Task
+	filename string
+	loaded   bool
+}
+
+func NewTaskManager(filename string) *TaskManager {
+	return &TaskManager{
+		tasks:    []Task{},
+		filename: filename,
+		loaded:   false,
+	}
+}
+
+func (tm *TaskManager) LoadTasks() error {
+	if tm.loaded {
+		return nil
+	}
+
+	file, err := os.Open(tm.filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			tm.loaded = true
+			return nil
+		}
+		return fmt.Errorf("error opening file: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return fmt.Errorf("error reading CSV: %w", err)
+	}
+
+	// Skip header row if it exists
+	if len(records) > 0 {
+		for _, record := range records[1:] {
+			task, err := tm.parseTaskFromRecord(record)
+			if err != nil {
+				continue
+			}
+			tm.tasks = append(tm.tasks, task)
+		}
+	}
+
+	tm.loaded = true
+	return nil
+}
+
+func (tm *TaskManager) SaveTasks() error {
+	file, err := os.Create(tm.filename)
+	if err != nil {
+		return fmt.Errorf("error creating file: %w", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write header
+	header := []string{"ID", "Description", "CreatedAt", "IsComplete"}
+	if err := writer.Write(header); err != nil {
+		return fmt.Errorf("error writing header: %w", err)
+	}
+
+	// Write all tasks
+	for _, task := range tm.tasks {
+		record := task.ToStringSlice()
+		if err := writer.Write(record); err != nil {
+			return fmt.Errorf("error writing task: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (tm *TaskManager) AddTask(description string) error {
+	if err := tm.LoadTasks(); err != nil {
+		return err
+	}
+
+	newTask := Task{
+		ID:          tm.getNextID(),
+		Description: description,
+		CreatedAt:   time.Now(),
+		IsComplete:  false,
+	}
+
+	tm.tasks = append(tm.tasks, newTask)
+	return tm.SaveTasks() // Save immediately after adding
+}
+
+func (tm *TaskManager) ListTasks(showAll bool) error {
+	if err := tm.LoadTasks(); err != nil {
+		return err
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', 0)
+	fmt.Fprintln(w, "ID\tDescription\tCreated\tComplete")
+
+	for _, task := range tm.tasks {
+		if showAll || !task.IsComplete {
+			fmt.Fprintf(w, "%d\t%s\t%s\t%t\n",
+				task.ID,
+				task.Description,
+				task.CreatedAt.Format("2006-01-02 15:04"),
+				task.IsComplete)
+		}
+	}
+
+	return w.Flush()
+}
+
+func (tm *TaskManager) MarkComplete(taskID int) error {
+	if err := tm.LoadTasks(); err != nil {
+		return err
+	}
+
+	for i := range tm.tasks {
+		if tm.tasks[i].ID == taskID {
+			tm.tasks[i].IsComplete = true
+			return tm.SaveTasks()
+		}
+	}
+
+	return fmt.Errorf("task with ID %d not found", taskID)
+}
+
+func (tm *TaskManager) DeleteTask(taskID int) error {
+	if err := tm.LoadTasks(); err != nil {
+		return err
+	}
+
+	for i, task := range tm.tasks {
+		if task.ID == taskID {
+			tm.tasks = append(tm.tasks[:i], tm.tasks[i+1:]...)
+			return tm.SaveTasks()
+		}
+	}
+
+	return fmt.Errorf("task with ID %d not found", taskID)
+}
+
+func (tm *TaskManager) getNextID() int {
+	if len(tm.tasks) == 0 {
+		return 1
+	}
+
+	maxID := 0
+	for _, task := range tm.tasks {
+		if task.ID > maxID {
+			maxID = task.ID
+		}
+	}
+	return maxID + 1
+}
+
+func (tm *TaskManager) parseTaskFromRecord(record []string) (Task, error) {
+	if len(record) != 4 {
+		return Task{}, fmt.Errorf("invalid record length")
+	}
+
+	id, err := strconv.Atoi(record[0])
+	if err != nil {
+		return Task{}, fmt.Errorf("invalid ID: %w", err)
+	}
+
+	createdAt, err := time.Parse("2006-01-02 15:04:05", record[2])
+	if err != nil {
+		return Task{}, fmt.Errorf("invalid date: %w", err)
+	}
+
+	isComplete, err := strconv.ParseBool(record[3])
+	if err != nil {
+		return Task{}, fmt.Errorf("invalid completion status: %w", err)
+	}
+
+	return Task{
+		ID:          id,
+		Description: record[1],
+		CreatedAt:   createdAt,
+		IsComplete:  isComplete,
+	}, nil
+}
+
+func (t *Task) ToStringSlice() []string {
+	return []string{
+		strconv.Itoa(t.ID),
+		t.Description,
+		t.CreatedAt.Format("2006-01-02 15:04:05"),
+		strconv.FormatBool(t.IsComplete),
+	}
 }
 
 func main() {
@@ -28,12 +226,14 @@ func main() {
 		return
 	}
 
+	tm := NewTaskManager(TasksFile)
+
 	cmd, args, err := parseCommand()
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 	}
 
-	if err := executeCommand(cmd, args); err != nil {
+	if err := executeCommand(cmd, tm, args); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
@@ -54,241 +254,56 @@ func parseCommand() (string, []string, error) {
 	return command, anyarguments, nil
 }
 
-func executeCommand(cmd string, args []string) error {
+func executeCommand(cmd string, tm *TaskManager, args []string) error {
 	switch cmd {
 	case "add":
-		return handleAddCommand(args)
+		return handleAddCommand(tm, args)
 	case "list":
-		return handleListCommand(args)
+		return handleListCommand(tm, args)
 	case "complete":
-		return handleCompleteCommand(args)
+		return handleCompleteCommand(tm, args)
 	case "delete":
-		return handleDeleteCommand(args)
+		return handleDeleteCommand(tm, args)
 	default:
 		return fmt.Errorf("'%s' command not found. Available commands: 'add', 'list', 'complete' or 'delete'", cmd)
 	}
 }
 
-func handleAddCommand(args []string) error {
+func handleAddCommand(tm *TaskManager, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("Add command requires task description")
 	}
 
 	description := args[0]
-	return addTask(description)
+	return tm.AddTask(description)
 }
-func handleListCommand(args []string) error {
+func handleListCommand(tm *TaskManager, args []string) error {
 	showAll := false
 	if len(args) > 0 && args[0] == "-all" {
 		showAll = true
 	}
 
-	return listTasks(showAll)
+	return tm.ListTasks(showAll)
 }
-func handleCompleteCommand(args []string) error {
+func handleCompleteCommand(tm *TaskManager, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("Complete command requires task ID")
 	}
 
-	ID := args[0]
-	return markComplete(ID)
+	ID, err := strconv.Atoi(args[0])
+	if err != nil {
+		return fmt.Errorf("invalid task ID: must be a number")
+	}
+	return tm.MarkComplete(ID)
 }
-func handleDeleteCommand(args []string) error {
+func handleDeleteCommand(tm *TaskManager, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("Delete command requires task ID")
 	}
 
-	ID := args[0]
-	return deleteTask(ID)
-}
-
-func addTask(desc string) error {
-	file, err := os.OpenFile("tasks.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-
+	ID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("Error opening file")
+		return fmt.Errorf("invalid task ID: must be a number")
 	}
-	defer file.Close()
-
-	readfile, err := os.Open("tasks.csv")
-	r := csv.NewReader(readfile)
-	tasks, err := r.ReadAll()
-	if err != nil {
-		return fmt.Errorf("Error reading CSV")
-	}
-	defer readfile.Close()
-
-	newtask := &Task{
-		ID:          getNextID(tasks),
-		Description: desc,
-		CreatedAt:   time.Now(),
-		IsComplete:  false,
-	}
-
-	record := newtask.ToStringSlice()
-
-	// TODO: Fix/Improve this new line when adding
-	w := csv.NewWriter(file)
-	file.WriteString("\n")
-	if err := w.Write(record); err != nil {
-		return fmt.Errorf("Error writing csv")
-	}
-
-	w.Flush()
-
-	if err := w.Error(); err != nil {
-		return fmt.Errorf("Error flushing csv")
-	}
-
-	return nil
-}
-
-func listTasks(showAll bool) error {
-	file, err := os.Open("tasks.csv")
-	if err != nil {
-		return fmt.Errorf("Error opening file")
-	}
-	defer file.Close()
-
-	r := csv.NewReader(file)
-
-	tasks, err := r.ReadAll()
-	if err != nil {
-		return fmt.Errorf("Error reading CSV")
-	}
-
-	// TODO: Formatting for Time output, '1 day ago'
-	t := new(tabwriter.Writer)
-	t.Init(os.Stdout, 0, 8, 0, '\t', 0)
-	fmt.Fprintln(t, tasks[0][0]+"\t"+tasks[0][1]+"\t"+tasks[0][2]+"\t"+tasks[0][3])
-	for _, task := range tasks[1:] {
-		if showAll || task[3] == "false" {
-			line := task[0] + "\t" + task[1] + "\t" + task[2] + "\t" + task[3]
-			fmt.Fprintln(t, line)
-		}
-	}
-	t.Flush()
-
-	return nil
-}
-
-func markComplete(ID string) error {
-	readfile, err := os.Open("tasks.csv")
-	r := csv.NewReader(readfile)
-	tasks, err := r.ReadAll()
-	if err != nil {
-		return fmt.Errorf("Error reading CSV")
-	}
-	defer readfile.Close()
-
-	for i, task := range tasks[1:] {
-		id, err := strconv.Atoi(task[0])
-		if err != nil {
-			continue
-		}
-		idToUpdate, err := strconv.Atoi(ID)
-		if err != nil {
-			continue
-		}
-		if id == idToUpdate {
-			tasks[i+1][3] = "true"
-			break
-		}
-	}
-
-	file, err := os.Create("tasks.csv")
-	if err != nil {
-		return fmt.Errorf("Error opening CSV")
-	}
-	defer file.Close()
-	w := csv.NewWriter(file)
-	if err := w.WriteAll(tasks); err != nil {
-		return fmt.Errorf("Error writing csv")
-	}
-
-	w.Flush()
-
-	if err := w.Error(); err != nil {
-		return fmt.Errorf("Error flushing csv")
-	}
-
-	return nil
-}
-
-func deleteTask(ID string) error {
-	readfile, err := os.Open("tasks.csv")
-	r := csv.NewReader(readfile)
-	tasks, err := r.ReadAll()
-	if err != nil {
-		return fmt.Errorf("Error reading CSV")
-	}
-	defer readfile.Close()
-
-	var filteredTasks [][]string
-
-	for i, task := range tasks {
-		// for the headers
-		if i == 0 {
-			filteredTasks = append(filteredTasks, task)
-			continue
-		}
-
-		id, err := strconv.Atoi(task[0])
-		if err != nil {
-			continue
-		}
-		idToUpdate, err := strconv.Atoi(ID)
-		if err != nil {
-			continue
-		}
-		if id == idToUpdate {
-			continue
-		}
-		filteredTasks = append(filteredTasks, task)
-	}
-
-	file, err := os.Create("tasks.csv")
-	if err != nil {
-		return fmt.Errorf("Error opening CSV")
-	}
-	defer file.Close()
-	w := csv.NewWriter(file)
-	if err := w.WriteAll(filteredTasks); err != nil {
-		return fmt.Errorf("Error writing CSV")
-	}
-
-	w.Flush()
-
-	if err := w.Error(); err != nil {
-		return fmt.Errorf("Error flushing CSV")
-	}
-
-	return nil
-}
-
-func getNextID(records [][]string) int {
-	if len(records) <= 1 {
-		return 1
-	}
-
-	lastRow := records[len(records)-1]
-	if len(lastRow) == 0 {
-		return 1
-	}
-
-	lastID, err := strconv.Atoi(lastRow[0])
-	if err != nil {
-		return 1
-	}
-
-	return lastID + 1
-}
-
-func (t *Task) ToStringSlice() []string {
-	return []string{
-		strconv.Itoa(t.ID),
-		t.Description,
-		t.CreatedAt.Format("2006-01-02 15:04:05"),
-		strconv.FormatBool(t.IsComplete),
-	}
+	return tm.DeleteTask(ID)
 }
