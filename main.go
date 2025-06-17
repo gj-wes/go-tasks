@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 )
@@ -274,7 +275,7 @@ func handleAddCommand(tm *TaskManager, args []string) error {
 		return fmt.Errorf("Add command requires task description")
 	}
 
-	description := args[0]
+	description := strings.Join(args, " ")
 	return tm.AddTask(description)
 }
 func handleListCommand(tm *TaskManager, args []string) error {
