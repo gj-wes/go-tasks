@@ -288,7 +288,11 @@ func handleAddCommand(tm *TaskManager, args []string) error {
 		return fmt.Errorf("Add command requires task description")
 	}
 
-	description := strings.Join(args, " ")
+	description := strings.TrimSpace(strings.Join(args, " "))
+	if len(description) == 0 {
+		return fmt.Errorf("Add command requires task description")
+	}
+
 	return tm.AddTask(description)
 }
 func handleListCommand(tm *TaskManager, args []string) error {
