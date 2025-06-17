@@ -116,7 +116,12 @@ func (tm *TaskManager) AddTask(description string) error {
 	}
 
 	tm.tasks = append(tm.tasks, newTask)
-	return tm.SaveTasks() // Save immediately after adding
+	if err := tm.SaveTasks(); err != nil {
+		return err
+	}
+
+	fmt.Printf("Task added: %s (ID: %d)\n", description, newTask.ID)
+	return nil
 }
 
 func (tm *TaskManager) ListTasks(showAll bool) error {
@@ -148,7 +153,11 @@ func (tm *TaskManager) MarkComplete(taskID int) error {
 	for i := range tm.tasks {
 		if tm.tasks[i].ID == taskID {
 			tm.tasks[i].IsComplete = true
-			return tm.SaveTasks()
+			if err := tm.SaveTasks(); err != nil {
+				return err
+			}
+			fmt.Println("Task completed!")
+			return nil
 		}
 	}
 
@@ -163,7 +172,11 @@ func (tm *TaskManager) DeleteTask(taskID int) error {
 	for i, task := range tm.tasks {
 		if task.ID == taskID {
 			tm.tasks = append(tm.tasks[:i], tm.tasks[i+1:]...)
-			return tm.SaveTasks()
+			if err := tm.SaveTasks(); err != nil {
+				return err
+			}
+			fmt.Println("Task deleted!")
+			return nil
 		}
 	}
 
