@@ -32,6 +32,25 @@ type TaskManager struct {
 	loaded   bool
 }
 
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: ./task <command>")
+		return
+	}
+
+	tm := NewTaskManager(TasksFile)
+
+	cmd, args, err := parseCommand(os.Args)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	}
+
+	if err := executeCommand(cmd, tm, args); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+}
+
 func NewTaskManager(filename string) *TaskManager {
 	return &TaskManager{
 		tasks:    []Task{},
@@ -231,25 +250,6 @@ func (t *Task) ToStringSlice() []string {
 		t.Description,
 		t.CreatedAt.Format("2006-01-02 15:04:05"),
 		strconv.FormatBool(t.IsComplete),
-	}
-}
-
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: ./task <command>")
-		return
-	}
-
-	tm := NewTaskManager(TasksFile)
-
-	cmd, args, err := parseCommand(os.Args)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	}
-
-	if err := executeCommand(cmd, tm, args); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
 	}
 }
 
