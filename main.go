@@ -1,9 +1,5 @@
 package main
 
-// TODO: Add extras
-// Add in an optional due date to the tasks
-// Change from CSV to JSON, JSONL or SQLite
-
 import (
 	"encoding/csv"
 	"fmt"
