@@ -1,9 +1,8 @@
 package main
 
 // TODO: Add extras
-// Change the IsComplete property of the Task data model to use a timestamp instead, which gives further information.
-// Change from CSV to JSON, JSONL or SQLite
 // Add in an optional due date to the tasks
+// Change from CSV to JSON, JSONL or SQLite
 
 import (
 	"encoding/csv"
@@ -21,7 +20,7 @@ type Task struct {
 	ID          int
 	Description string
 	CreatedAt   time.Time
-	IsComplete  bool
+	Completed   time.Time
 }
 
 // TaskManager to hold tasks in memory and manage file operations
@@ -106,7 +105,7 @@ func (tm *TaskManager) SaveTasks() error {
 	defer writer.Flush()
 
 	// Write header
-	header := []string{"ID", "Description", "CreatedAt", "IsComplete"}
+	header := []string{"ID", "Description", "CreatedAt", "Completed"}
 	if err := writer.Write(header); err != nil {
 		return fmt.Errorf("error writing header: %w", err)
 	}
@@ -131,7 +130,7 @@ func (tm *TaskManager) AddTask(description string) error {
 		ID:          tm.getNextID(),
 		Description: description,
 		CreatedAt:   time.Now(),
-		IsComplete:  false,
+		Completed:   time.Time{},
 	}
 
 	tm.tasks = append(tm.tasks, newTask)
@@ -152,12 +151,16 @@ func (tm *TaskManager) ListTasks(showAll bool) error {
 	fmt.Fprintln(w, "ID\tDescription\tCreated\tComplete")
 
 	for _, task := range tm.tasks {
-		if showAll || !task.IsComplete {
-			fmt.Fprintf(w, "%d\t%s\t%s\t%t\n",
+		if showAll || task.Completed.IsZero() {
+			completedStr := "Not yet"
+			if !task.Completed.IsZero() {
+				completedStr = task.Completed.Format("2006-01-02 15:04")
+			}
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n",
 				task.ID,
 				task.Description,
 				task.CreatedAt.Format("2006-01-02 15:04"),
-				task.IsComplete)
+				completedStr)
 		}
 	}
 
@@ -171,7 +174,7 @@ func (tm *TaskManager) MarkComplete(taskID int) error {
 
 	for i := range tm.tasks {
 		if tm.tasks[i].ID == taskID {
-			tm.tasks[i].IsComplete = true
+			tm.tasks[i].Completed = time.Now()
 			if err := tm.SaveTasks(); err != nil {
 				return err
 			}
@@ -231,7 +234,7 @@ func (tm *TaskManager) parseTaskFromRecord(record []string) (Task, error) {
 		return Task{}, fmt.Errorf("invalid date: %w", err)
 	}
 
-	isComplete, err := strconv.ParseBool(record[3])
+	completed, err := time.Parse("2006-01-02 15:04:05", record[3])
 	if err != nil {
 		return Task{}, fmt.Errorf("invalid completion status: %w", err)
 	}
@@ -240,7 +243,7 @@ func (tm *TaskManager) parseTaskFromRecord(record []string) (Task, error) {
 		ID:          id,
 		Description: record[1],
 		CreatedAt:   createdAt,
-		IsComplete:  isComplete,
+		Completed:   completed,
 	}, nil
 }
 
@@ -249,7 +252,7 @@ func (t *Task) ToStringSlice() []string {
 		strconv.Itoa(t.ID),
 		t.Description,
 		t.CreatedAt.Format("2006-01-02 15:04:05"),
-		strconv.FormatBool(t.IsComplete),
+		t.Completed.Format("2006-01-02 15:04:05"),
 	}
 }
 
